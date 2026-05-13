@@ -1,127 +1,223 @@
-using System;
 using Android.Content;
-using Android.Views;
-using Android.Widget;
 using Android.Graphics;
 using Android.OS;
+using Android.Provider;
+using Android.Views;
+using Android.Widget;
 
 namespace osu.Android
 {
-    public sealed class ModMenuOverlay : IDisposable
+    public class ModMenuOverlay : Java.Lang.Object
     {
         private readonly Context context;
-        private readonly IWindowManager windowManager;
 
-        private View trigger;
-        private LinearLayout panel;
+        private IWindowManager? windowManager;
 
-        private bool shown;
+        private LinearLayout? menuLayout;
 
-        public ModMenuOverlay(Context ctx)
+        private ImageView? triggerButton;
+
+        private bool menuVisible;
+
+        private Button? autoPlayButton;
+        private Button? noMissButton;
+        private Button? relaxButton;
+        private Button? instantSpinButton;
+
+        public ModMenuOverlay(Context context)
         {
-            context = ctx;
-            windowManager = ctx.GetSystemService(Context.WindowService) as IWindowManager;
-
-            CreateTrigger();
-            CreatePanel();
+            this.context = context;
         }
 
-        // ===== INVISIBLE TRIGGER =====
-
-        private void CreateTrigger()
+        public void Show()
         {
-            trigger = new View(context);
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
+            {
+                if (!Settings.CanDrawOverlays(context))
+                    return;
+            }
 
-            var p = new WindowManagerLayoutParams(
-                1, 1,
-                WindowManagerTypes.ApplicationOverlay,
+            windowManager = context
+                .GetSystemService(Context.WindowService)!
+                .JavaCast<IWindowManager>();
+
+            createTrigger();
+            createMenu();
+
+            ModMenu.OnStateChanged += updateButtons;
+        }
+
+        private void createTrigger()
+        {
+            triggerButton = new ImageView(context);
+
+            triggerButton.SetBackgroundColor(Color.Argb(1, 255, 255, 255));
+
+            var triggerParams = new WindowManagerLayoutParams(
+                80,
+                80,
+                getOverlayType(),
                 WindowManagerFlags.NotFocusable,
-                PixelFormat.Translucent
+                Format.Translucent
             );
 
-            p.Gravity = GravityFlags.Left | GravityFlags.Top;
-            p.X = 0;
-            p.Y = 0;
+            triggerParams.Gravity = GravityFlags.Top | GravityFlags.Left;
 
-            trigger.Click += (s, e) =>
+            triggerParams.X = 0;
+            triggerParams.Y = 300;
+
+            triggerButton.Click += (_, _) =>
             {
-                TogglePanel();
+                toggleMenu();
             };
 
-            windowManager.AddView(trigger, p);
+            windowManager?.AddView(triggerButton, triggerParams);
         }
 
-        // ===== PANEL =====
-
-        private void CreatePanel()
+        private void createMenu()
         {
-            panel = new LinearLayout(context)
+            menuLayout = new LinearLayout(context);
+
+            menuLayout.Orientation = Orientation.Vertical;
+
+            menuLayout.SetPadding(25, 25, 25, 25);
+
+            menuLayout.SetBackgroundColor(Color.Argb(220, 20, 20, 20));
+
+            autoPlayButton = createButton();
+            noMissButton = createButton();
+            relaxButton = createButton();
+            instantSpinButton = createButton();
+
+            autoPlayButton.Click += (_, _) =>
             {
-                Orientation = Orientation.Vertical
+                ModMenu.ToggleAutoPlay();
             };
 
-            panel.SetBackgroundColor(Color.Argb(180, 0, 0, 0));
+            noMissButton.Click += (_, _) =>
+            {
+                ModMenu.ToggleNoMiss();
+            };
 
-            AddButton("AutoPlay", () => ModMenu.ToggleAutoPlay());
-            AddButton("NoMiss", () => ModMenu.ToggleNoMiss());
-            AddButton("Relax", () => ModMenu.ToggleRelax());
-            AddButton("InstantSpin", () => ModMenu.ToggleInstantSpin());
-            AddButton("Close", HidePanel);
+            relaxButton.Click += (_, _) =>
+            {
+                ModMenu.ToggleRelax();
+            };
 
-            var p = new WindowManagerLayoutParams(
-                WindowManagerLayoutParams.WrapContent,
-                WindowManagerLayoutParams.WrapContent,
-                WindowManagerTypes.ApplicationOverlay,
+            instantSpinButton.Click += (_, _) =>
+            {
+                ModMenu.ToggleInstantSpin();
+            };
+
+            menuLayout.AddView(autoPlayButton);
+            menuLayout.AddView(noMissButton);
+            menuLayout.AddView(relaxButton);
+            menuLayout.AddView(instantSpinButton);
+
+            var menuParams = new WindowManagerLayoutParams(
+                ViewGroup.LayoutParams.WrapContent,
+                ViewGroup.LayoutParams.WrapContent,
+                getOverlayType(),
                 WindowManagerFlags.NotFocusable,
-                PixelFormat.Translucent
+                Format.Translucent
             );
 
-            p.Gravity = GravityFlags.Center;
+            menuParams.Gravity = GravityFlags.Center;
 
-            panel.Visibility = ViewStates.Gone;
+            menuLayout.Visibility = ViewStates.Gone;
 
-            windowManager.AddView(panel, p);
+            windowManager?.AddView(menuLayout, menuParams);
+
+            updateButtons();
         }
 
-        private void AddButton(string text, System.Action action)
+        private Button createButton()
         {
-            var btn = new Button(context)
+            var button = new Button(context);
+
+            button.SetTextColor(Color.White);
+
+            return button;
+        }
+
+        private void toggleMenu()
+        {
+            if (menuLayout == null)
+                return;
+
+            menuVisible = !menuVisible;
+
+            menuLayout.Visibility = menuVisible
+                ? ViewStates.Visible
+                : ViewStates.Gone;
+        }
+
+        private void updateButtons()
+        {
+            if (autoPlayButton != null)
             {
-                Text = text
-            };
+                autoPlayButton.Text =
+                    $"AutoPlay [{state(ModMenu.AutoPlayEnabled)}]";
+            }
 
-            btn.Click += (s, e) => action();
-            panel.AddView(btn);
+            if (noMissButton != null)
+            {
+                noMissButton.Text =
+                    $"NoMiss [{state(ModMenu.NoMissEnabled)}]";
+            }
+
+            if (relaxButton != null)
+            {
+                relaxButton.Text =
+                    $"Relax [{state(ModMenu.RelaxEnabled)}]";
+            }
+
+            if (instantSpinButton != null)
+            {
+                instantSpinButton.Text =
+                    $"InstantSpin [{state(ModMenu.InstantSpinEnabled)}]";
+            }
         }
 
-        // ===== CONTROL =====
-
-        private void TogglePanel()
+        private string state(bool enabled)
         {
-            if (shown) HidePanel();
-            else ShowPanel();
+            return enabled ? "ON" : "OFF";
         }
 
-        private void ShowPanel()
+        private WindowManagerTypes getOverlayType()
         {
-            panel.Visibility = ViewStates.Visible;
-            shown = true;
-        }
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+                return WindowManagerTypes.ApplicationOverlay;
 
-        private void HidePanel()
-        {
-            panel.Visibility = ViewStates.Gone;
-            shown = false;
+            return WindowManagerTypes.Phone;
         }
 
         public void Dispose()
         {
-            try
+            ModMenu.OnStateChanged -= updateButtons;
+
+            if (triggerButton != null)
             {
-                windowManager.RemoveView(trigger);
-                windowManager.RemoveView(panel);
+                windowManager?.RemoveView(triggerButton);
+
+                triggerButton.Dispose();
+
+                triggerButton = null;
             }
-            catch { }
+
+            if (menuLayout != null)
+            {
+                windowManager?.RemoveView(menuLayout);
+
+                menuLayout.Dispose();
+
+                menuLayout = null;
+            }
+
+            autoPlayButton = null;
+            noMissButton = null;
+            relaxButton = null;
+            instantSpinButton = null;
         }
     }
 }
