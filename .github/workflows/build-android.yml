@@ -25,8 +25,8 @@ jobs:
       - name: Restore workloads
         run: dotnet workload restore
       
-      - name: Restore dependencies
-        run: dotnet restore
+      - name: Restore Android only
+        run: dotnet restore osu.Android/osu.Android.csproj
       
       - name: Build APK
         run: dotnet publish -c Release -f net8.0-android osu.Android/osu.Android.csproj
