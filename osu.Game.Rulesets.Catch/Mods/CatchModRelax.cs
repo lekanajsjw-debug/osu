@@ -1,0 +1,109 @@
+// Copyright (c) ppy Pty Ltd <contact@ppy.sh>. Licensed under the MIT Licence.
+// See the LICENCE file in the repository root for full licence text.
+
+using System;
+using System.Linq;
+using osu.Framework.Graphics;
+using osu.Framework.Input;
+using osu.Framework.Input.Bindings;
+using osu.Framework.Input.Events;
+using osu.Framework.Localisation;
+using osu.Game.Rulesets.Catch.Objects;
+using osu.Game.Rulesets.Catch.UI;
+using osu.Game.Rulesets.Mods;
+using osu.Game.Rulesets.UI;
+using osu.Game.Screens.Play;
+using osuTK;
+
+#if ANDROID
+using osu.Android;
+#endif
+
+namespace osu.Game.Rulesets.Catch.Mods
+{
+    /// <summary>
+    /// Relax мод для Catch.
+    /// На Android активируется исключительно через ModMenu оверлей.
+    /// Когда активен — управление катчером идёт мышью/касанием напрямую по X,
+    /// клавиши лево/право блокируются.
+    /// </summary>
+    public partial class CatchModRelax : ModRelax,
+        IApplicableToDrawableRuleset<CatchHitObject>,
+        IApplicableToPlayer
+    {
+        public override LocalisableString Description => @"Use the mouse to control the catcher.";
+
+        public override Type[] IncompatibleMods =>
+            base.IncompatibleMods.Concat(new[] { typeof(CatchModMovingFast) }).ToArray();
+
+        private DrawableCatchRuleset drawableRuleset = null!;
+
+        /// <summary>
+        /// Возвращает true только если оверлей разрешает Relax.
+        /// </summary>
+        public bool IsActive
+        {
+            get
+            {
+#if ANDROID
+                return ModMenu.RelaxEnabled;
+#else
+                return true;
+#endif
+            }
+        }
+
+        public void ApplyToDrawableRuleset(DrawableRuleset<CatchHitObject> drawableRuleset)
+        {
+            this.drawableRuleset = (DrawableCatchRuleset)drawableRuleset;
+        }
+
+        public void ApplyToPlayer(Player player)
+        {
+            // Добавляем mouse-helper только если оверлей разрешил Relax
+            // и реплей не загружен
+            if (!IsActive) return;
+
+            if (!drawableRuleset.HasReplayLoaded.Value)
+            {
+                var catchPlayfield = (CatchPlayfield)drawableRuleset.Playfield;
+                catchPlayfield.CatcherArea.Add(new MouseInputHelper(catchPlayfield.CatcherArea));
+            }
+        }
+
+        // ── Внутренний хелпер для мыши ─────────────────────────────────────
+
+        private partial class MouseInputHelper : Drawable,
+            IKeyBindingHandler<CatchAction>,
+            IRequireHighFrequencyMousePosition
+        {
+            private readonly CatcherArea catcherArea;
+
+            public override bool ReceivePositionalInputAt(Vector2 screenSpacePos) => true;
+
+            public MouseInputHelper(CatcherArea catcherArea)
+            {
+                this.catcherArea = catcherArea;
+                RelativeSizeAxes = Axes.Both;
+            }
+
+            // Блокируем клавиатурное управление пока Relax активен
+            public bool OnPressed(KeyBindingPressEvent<CatchAction> e) => true;
+
+            public void OnReleased(KeyBindingReleaseEvent<CatchAction> e) { }
+
+            protected override bool OnMouseMove(MouseMoveEvent e)
+            {
+#if ANDROID
+                // Дополнительная проверка: если пользователь выключил Relax в оверлее
+                // прямо во время игры — перестаём перехватывать движение
+                if (!ModMenu.RelaxEnabled)
+                    return base.OnMouseMove(e);
+#endif
+                catcherArea.SetCatcherPosition(
+                    e.MousePosition.X / DrawSize.X * CatchPlayfield.WIDTH);
+                return base.OnMouseMove(e);
+            }
+        }
+    }
+}
