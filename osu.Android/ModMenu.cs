@@ -10,17 +10,17 @@ namespace osu.Android
         public static bool RelaxEnabled { get; private set; }
         public static bool InstantSpinEnabled { get; private set; }
 
-        public static void ToggleAutoPlay()
+        public static void SetAutoPlay(bool enabled)
         {
-            AutoPlayEnabled = !AutoPlayEnabled;
+            AutoPlayEnabled = enabled;
 
-            if (AutoPlayEnabled)
+            if (enabled)
                 NoMissEnabled = true;
         }
 
-        public static void ToggleNoMiss() => NoMissEnabled = !NoMissEnabled;
-        public static void ToggleRelax() => RelaxEnabled = !RelaxEnabled;
-        public static void ToggleInstantSpin() => InstantSpinEnabled = !InstantSpinEnabled;
+        public static void SetNoMiss(bool enabled) => NoMissEnabled = enabled;
+        public static void SetRelax(bool enabled) => RelaxEnabled = enabled;
+        public static void SetInstantSpin(bool enabled) => InstantSpinEnabled = enabled;
 
         public static Dictionary<string, bool> GetStates() => new()
         {
