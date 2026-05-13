@@ -9,6 +9,7 @@ using Android.Content.PM;
 using Android.Graphics;
 using Android.OS;
 using Android.Views;
+using Android.Provider;
 using osu.Framework.Android;
 using osu.Game.Database;
 using Debug = System.Diagnostics.Debug;
@@ -16,15 +17,17 @@ using Uri = Android.Net.Uri;
 
 namespace osu.Android
 {
-    [Activity(ConfigurationChanges = DEFAULT_CONFIG_CHANGES, Exported = true, LaunchMode = DEFAULT_LAUNCH_MODE, MainLauncher = true)]
+    [Activity(ConfigurationChanges = DEFAULT_CONFIG_CHANGES,
+        Exported = true,
+        LaunchMode = DEFAULT_LAUNCH_MODE,
+        MainLauncher = true)]
     public class OsuGameActivity : AndroidGameActivity
     {
         private readonly OsuGameAndroid game;
-
         private bool gameCreated;
 
         // ===== OVERLAY =====
-        private ModMenuOverlay overlay;
+        private ModMenuOverlay? overlay;
 
         public new bool IsTablet { get; private set; }
         public ScreenOrientation DefaultOrientation;
@@ -53,11 +56,15 @@ namespace osu.Android
             Window.AddFlags(WindowManagerFlags.KeepScreenOn);
 
             Point displaySize = new Point();
+
 #pragma warning disable CA1422
             WindowManager.DefaultDisplay.GetSize(displaySize);
 #pragma warning restore CA1422
 
-            float smallestWidthDp = Math.Min(displaySize.X, displaySize.Y) / Resources.DisplayMetrics.Density;
+            float smallestWidthDp =
+                Math.Min(displaySize.X, displaySize.Y) /
+                Resources.DisplayMetrics.Density;
+
             IsTablet = smallestWidthDp >= 600f;
 
             RequestedOrientation = DefaultOrientation =
@@ -69,13 +76,13 @@ namespace osu.Android
             Assembly.Load("osu.Game.Rulesets.Mania");
 
             // ===== OVERLAY INIT =====
-            if (Android.Provider.Settings.CanDrawOverlays(this))
+            if (Settings.CanDrawOverlays(this))
             {
                 overlay = new ModMenuOverlay(this);
             }
             else
             {
-                var intent = new Intent(Android.Provider.Settings.ActionManageOverlayPermission);
+                var intent = new Intent(Settings.ActionManageOverlayPermission);
                 StartActivity(intent);
             }
         }
@@ -135,6 +142,13 @@ namespace osu.Android
                 await game.Import(tasks.ToArray()).ConfigureAwait(false);
 
             }, TaskCreationOptions.LongRunning);
+        }
+
+        protected override void OnDestroy()
+        {
+            base.OnDestroy();
+
+            overlay?.Dispose();
         }
     }
 }
