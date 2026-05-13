@@ -28,13 +28,23 @@ jobs:
       - name: Install Android workload
         run: dotnet workload install android
 
-      - name: Restore dependencies
-        run: dotnet restore
+      - name: Restore Android project
+        run: dotnet restore osu.Android/osu.Android.csproj
 
       - name: Publish Android APK
         run: |
-          dotnet publish osu.Android \
+          dotnet publish osu.Android/osu.Android.csproj \
             -c Release \
+            -f net8.0-android \
+            -p:AndroidPackageFormat=apk \
+            -p:UseInterpreter=true \
+            -p:PublishTrimmed=false
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: osu-lazer-android
+          path: osu.Android/bin/Release/net8.0-android/publish/*.apk            -c Release \
             -f net8.0-android \
             -p:AndroidPackageFormat=apk
 
