@@ -2,436 +2,380 @@ using Android.App;
 using Android.Content;
 using Android.Widget;
 using HarmonyLib;
-using osu.Game.Rulesets.Scoring;
 using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Objects;
+using osu.Game.Rulesets.Scoring;
 using osu.Game.Scoring;
-using osu.Game.Screens.Play;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
-using osu.Game.Beatmaps.ControlPoints;
-using osu.Game.Rulesets.Osu.Objects;
-using osu.Game.Rulesets.Osu.Scoring;
-using osu.Game.Rulesets.UI;
 
 namespace osu.Android
 {
-    /// <summary>
-    /// ModMenu - система модификаций для osu! Android
-    /// Использует Harmony для динамического патчинга игровой логики
-    /// </summary>
-    public class ModMenu : IDisposable
+    public sealed class ModMenu : IDisposable
     {
         private readonly Context context;
-        private static ModMenu instance;
-        private Harmony harmony;
-        private bool isDisposed;
-        
-        // Статические настройки модов (доступны из Harmony патчей)
+        private readonly Harmony harmony;
+
+        private bool disposed;
+
         public static bool AutoPlayEnabled { get; private set; }
         public static bool NoMissEnabled { get; private set; }
-        public static bool InstantSpinEnabled { get; private set; }
         public static bool RelaxEnabled { get; private set; }
-        public static float AccuracyMultiplier { get; set; } = 1.0f;
-        public static float ApproachRate { get; set; } = -1f;
-        public static float HitBoxMultiplier { get; set; } = 1.5f;
-        
-        // Режимы сабмита скора
+        public static bool InstantSpinEnabled { get; private set; }
+
         public enum ScoreSubmissionMode
         {
-            Normal,      // Обычный сабмит с видимыми модами
-            Clean,       // Скрытые моды в сабмите
-            Offline      // Локальное сохранение (без сабмита)
+            Normal,
+            Clean,
+            Offline
         }
-        
-        public static ScoreSubmissionMode SubmissionMode { get; set; } = ScoreSubmissionMode.Normal;
 
-        public ModMenu(Context context)
+        public static ScoreSubmissionMode SubmissionMode { get; set; }
+            = ScoreSubmissionMode.Normal;
+
+        public ModMenu(Context ctx)
         {
-            if (context == null) throw new ArgumentNullException(nameof(context));
-            
-            this.context = context;
-            instance = this;
-            isDisposed = false;
-            
-            try
-            {
-                InitializeHarmonyPatches();
-            }
-            catch (Exception ex)
-            {
-                ShowToast($"ModMenu: Ошибка инициализации - {ex.Message}");
-            }
+            context = ctx ?? throw new ArgumentNullException(nameof(ctx));
+
+            harmony = new Harmony("com.osu.modmenu");
+
+            Initialize();
         }
 
-        private void InitializeHarmonyPatches()
+        private void Initialize()
         {
             try
             {
-                harmony = new Harmony("com.osu.modmenu.patches");
-                
-                // Патч ScoreProcessor для обработки результатов попаданий
                 PatchMethod(
                     typeof(ScoreProcessor),
                     "ApplyResult",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    nameof(OnApplyResultPrefix),
-                    null
+                    new[] { typeof(JudgementResult) },
+                    nameof(OnApplyResultPrefix)
                 );
-                
-                // Патч HealthProcessor для управления здоровьем
+
                 PatchMethod(
                     typeof(HealthProcessor),
                     "ApplyResult",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    nameof(OnHealthApplyResultPrefix),
-                    null
+                    new[] { typeof(JudgementResult) },
+                    nameof(OnHealthApplyResultPrefix)
                 );
-                
-                // Патч для InstantSpin - мгновенное завершение спиннеров
-                var osuScoreProcessor = Type.GetType("osu.Game.Rulesets.Osu.Scoring.OsuScoreProcessor, osu.Game.Rulesets.Osu");
+
+                var osuScoreProcessor =
+                    typeof(ScoreProcessor).Assembly.GetType(
+                        "osu.Game.Rulesets.Osu.Scoring.OsuScoreProcessor"
+                    );
+
                 if (osuScoreProcessor != null)
                 {
                     PatchMethod(
                         osuScoreProcessor,
                         "SimulateAutoplay",
-                        BindingFlags.NonPublic | BindingFlags.Instance,
-                        nameof(OnSimulateAutoplayPrefix),
-                        null
+                        new[] { typeof(HitObject) },
+                        nameof(OnSimulateAutoplayPrefix)
                     );
                 }
-                
-                // Патч для перехвата сабмита скора
-                var scoreManager = Type.GetType("osu.Game.Scoring.ScoreManager, osu.Game");
+
+                var scoreManager =
+                    typeof(Score).Assembly.GetType(
+                        "osu.Game.Scoring.ScoreManager"
+                    );
+
                 if (scoreManager != null)
                 {
                     PatchMethod(
                         scoreManager,
                         "Submit",
-                        BindingFlags.Public | BindingFlags.Instance,
-                        nameof(OnScoreSubmitPrefix),
-                        null
+                        Type.EmptyTypes,
+                        nameof(OnScoreSubmitPrefix)
                     );
                 }
-                
-                ShowToast("ModMenu: Патчи успешно применены");
+
+                Toast("ModMenu loaded");
             }
             catch (Exception ex)
             {
-                ShowToast($"ModMenu: Ошибка при патчинге - {ex.Message}");
-                harmony?.UnpatchAll("com.osu.modmenu.patches");
-                throw;
+                Toast($"Init error: {ex.Message}");
             }
         }
-        
-        /// <summary>
-        /// Вспомогательный метод для безопасного патчинга
-        /// </summary>
-        private void PatchMethod(Type targetType, string methodName, BindingFlags flags, 
-            string prefixMethodName, string postfixMethodName)
+
+        private void PatchMethod(
+            Type targetType,
+            string methodName,
+            Type[] parameters,
+            string prefixMethod = null,
+            string postfixMethod = null)
         {
             try
             {
-                var method = targetType?.GetMethod(methodName, flags);
+                if (targetType == null)
+                    return;
+
+                var method = targetType.GetMethod(
+                    methodName,
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.Instance |
+                    BindingFlags.Static,
+                    null,
+                    parameters,
+                    null
+                );
+
                 if (method == null)
                 {
-                    ShowToast($"Метод не найден: {targetType?.Name}.{methodName}");
+                    Toast($"Method not found: {methodName}");
                     return;
                 }
 
-                var prefixMethod = prefixMethodName != null 
-                    ? new HarmonyMethod(typeof(ModMenu), prefixMethodName) 
-                    : null;
-                    
-                var postfixMethod = postfixMethodName != null 
-                    ? new HarmonyMethod(typeof(ModMenu), postfixMethodName) 
-                    : null;
+                HarmonyMethod prefix = null;
+                HarmonyMethod postfix = null;
 
-                harmony.Patch(method, prefix: prefixMethod, postfix: postfixMethod);
+                if (!string.IsNullOrEmpty(prefixMethod))
+                {
+                    var m = typeof(ModMenu).GetMethod(
+                        prefixMethod,
+                        BindingFlags.Static |
+                        BindingFlags.Public |
+                        BindingFlags.NonPublic
+                    );
+
+                    if (m != null)
+                        prefix = new HarmonyMethod(m);
+                }
+
+                if (!string.IsNullOrEmpty(postfixMethod))
+                {
+                    var m = typeof(ModMenu).GetMethod(
+                        postfixMethod,
+                        BindingFlags.Static |
+                        BindingFlags.Public |
+                        BindingFlags.NonPublic
+                    );
+
+                    if (m != null)
+                        postfix = new HarmonyMethod(m);
+                }
+
+                harmony.Patch(method, prefix, postfix);
             }
             catch (Exception ex)
             {
-                ShowToast($"Ошибка патчинга {methodName}: {ex.Message}");
+                Toast($"Patch error: {ex.Message}");
             }
         }
-        
-        /// <summary>
-        /// Хук ScoreProcessor - управление точностью и миссами
-        /// </summary>
-        public static bool OnApplyResultPrefix(ScoreProcessor __instance, JudgementResult result)
+
+        public static bool OnApplyResultPrefix(
+            ScoreProcessor __instance,
+            JudgementResult result)
         {
             try
             {
-                if (result == null) return true;
-                
-                // NoMiss - превращаем миссы в 50
-                if (NoMissEnabled && result.Type == HitResult.Miss)
-                {
-                    ModifyJudgementResult(result, HitResult.Meh, 0.0);
+                if (result == null)
                     return true;
-                }
-                
-                // Relax - автоматическая идеальная точность
-                if (RelaxEnabled && result.Type != HitResult.Miss)
+
+                if (NoMissEnabled &&
+                    result.Type == HitResult.Miss)
                 {
-                    ModifyJudgementResult(result, HitResult.Great, 0.0);
-                    return true;
+                    ModifyJudgementResult(
+                        result,
+                        HitResult.Meh,
+                        0
+                    );
                 }
-                
-                // AccuracyMultiplier - модификатор точности
-                if (Math.Abs(AccuracyMultiplier - 1.0f) > 0.01f && AccuracyMultiplier > 0)
+
+                if (RelaxEnabled &&
+                    result.Type != HitResult.Miss)
                 {
-                    // Масштабируем результат в зависимости от множителя
-                    if (AccuracyMultiplier < 1.0f && result.Type == HitResult.Great)
-                    {
-                        ModifyJudgementResult(result, HitResult.Ok, result.TimeOffset);
-                    }
+                    ModifyJudgementResult(
+                        result,
+                        HitResult.Great,
+                        0
+                    );
                 }
-                
+
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine($"OnApplyResultPrefix error: {ex.Message}");
                 return true;
             }
         }
-        
-        /// <summary>
-        /// Хук HealthProcessor - управление здоровьем игрока
-        /// </summary>
-        public static bool OnHealthApplyResultPrefix(HealthProcessor __instance, JudgementResult result)
+
+        public static bool OnHealthApplyResultPrefix(
+            HealthProcessor __instance,
+            JudgementResult result)
         {
             try
             {
-                if (__instance == null || result == null) return true;
-                
+                if (__instance == null)
+                    return true;
+
                 if (NoMissEnabled || AutoPlayEnabled)
                 {
-                    // Восстанавливаем здоровье при неправильном результате
-                    ModifyHealth(__instance, 0.2f);
-                    return false; // Прерываем обычную обработку урона
+                    AddHealth(__instance, 0.15f);
                 }
-                
+
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine($"OnHealthApplyResultPrefix error: {ex.Message}");
                 return true;
             }
         }
-        
-        /// <summary>
-        /// Хук для InstantSpin - мгновенное завершение спиннеров
-        /// </summary>
-        public static bool OnSimulateAutoplayPrefix(object __instance, HitObject hitObject)
+
+        public static bool OnSimulateAutoplayPrefix(
+            object __instance,
+            HitObject hitObject)
         {
             try
             {
-                if (!InstantSpinEnabled || hitObject == null) return true;
-                
-                // Проверяем тип объекта
-                var spinnerType = Type.GetType("osu.Game.Rulesets.Osu.Objects.Spinner, osu.Game.Rulesets.Osu");
-                if (spinnerType != null && spinnerType.IsAssignableFrom(hitObject.GetType()))
+                if (!InstantSpinEnabled || hitObject == null)
+                    return true;
+
+                var spinnerType =
+                    hitObject.GetType();
+
+                if (spinnerType.Name.Contains("Spinner"))
                 {
-                    // Принудительно завершаем спиннер
-                    var completeMethod = hitObject.GetType().GetMethod("Complete",
-                        BindingFlags.Public | BindingFlags.Instance);
+                    var completeMethod =
+                        spinnerType.GetMethod(
+                            "Complete",
+                            BindingFlags.Public |
+                            BindingFlags.NonPublic |
+                            BindingFlags.Instance
+                        );
+
                     completeMethod?.Invoke(hitObject, null);
-                    
-                    return false; // Прерываем обычную симуляцию
+
+                    return false;
                 }
-                
+
                 return true;
             }
-            catch (Exception ex)
+            catch
             {
-                System.Diagnostics.Debug.WriteLine($"OnSimulateAutoplayPrefix error: {ex.Message}");
-                return true;
-            }
-        }
-        
-        /// <summary>
-        /// Перехват сабмита скора - управление видимостью модов
-        /// </summary>
-        public static bool OnScoreSubmitPrefix(object __instance, object score)
-        {
-            try
-            {
-                if (score == null) return true;
-                
-                switch (SubmissionMode)
-                {
-                    case ScoreSubmissionMode.Offline:
-                        // Блокируем онлайн сабмит
-                        return false;
-                        
-                    case ScoreSubmissionMode.Clean:
-                        // Скрываем информацию о модах перед сабмитом
-                        ClearScoreMods(score);
-                        if (NoMissEnabled || AutoPlayEnabled)
-                            ClearScoreStatistics(score);
-                        return true;
-                        
-                    default:
-                        return true; // Нормальный сабмит
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"OnScoreSubmitPrefix error: {ex.Message}");
                 return true;
             }
         }
-        
-        // ============ Вспомогательные методы для рефлексии ============
-        
-        /// <summary>
-        /// Модифицирует результат попадания через рефлексию
-        /// </summary>
-        private static void ModifyJudgementResult(JudgementResult result, HitResult newType, double newTimeOffset)
+
+        public static bool OnScoreSubmitPrefix()
         {
             try
             {
-                var typeField = typeof(JudgementResult).GetField("type", 
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                typeField?.SetValue(result, newType);
-                
-                var timeField = typeof(JudgementResult).GetField("timeOffset",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                timeField?.SetValue(result, newTimeOffset);
-            }
-            catch { /* Игнорируем ошибки рефлексии */ }
-        }
-        
-        /// <summary>
-        /// Модифицирует здоровье игрока
-        /// </summary>
-        private static void ModifyHealth(HealthProcessor processor, float addHealth)
-        {
-            try
-            {
-                var healthField = typeof(HealthProcessor).GetField("health",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                
-                if (healthField != null)
+                if (SubmissionMode ==
+                    ScoreSubmissionMode.Offline)
                 {
-                    float currentHealth = (float)healthField.GetValue(processor);
-                    float newHealth = Math.Min(currentHealth + addHealth, 1.0f);
-                    healthField.SetValue(processor, newHealth);
+                    return false;
                 }
+
+                return true;
             }
-            catch { /* Игнорируем ошибки */ }
+            catch
+            {
+                return true;
+            }
         }
-        
-        /// <summary>
-        /// Очищает моды из информации о скоре
-        /// </summary>
-        private static void ClearScoreMods(object score)
+
+        private static void ModifyJudgementResult(
+            JudgementResult result,
+            HitResult newType,
+            double offset)
         {
             try
             {
-                var modsProperty = score.GetType().GetProperty("Mods",
-                    BindingFlags.Public | BindingFlags.Instance);
-                if (modsProperty != null && modsProperty.CanWrite)
-                {
-                    modsProperty.SetValue(score, new List<object>());
-                }
+                var typeProp =
+                    typeof(JudgementResult).GetProperty(
+                        "Type",
+                        BindingFlags.Public |
+                        BindingFlags.NonPublic |
+                        BindingFlags.Instance
+                    );
+
+                typeProp?.SetValue(result, newType);
+
+                var offsetProp =
+                    typeof(JudgementResult).GetProperty(
+                        "TimeOffset",
+                        BindingFlags.Public |
+                        BindingFlags.NonPublic |
+                        BindingFlags.Instance
+                    );
+
+                offsetProp?.SetValue(result, offset);
             }
-            catch { /* Игнорируем ошибки */ }
+            catch
+            {
+            }
         }
-        
-        /// <summary>
-        /// Очищает статистику скора
-        /// </summary>
-        private static void ClearScoreStatistics(object score)
+
+        private static void AddHealth(
+            HealthProcessor processor,
+            float amount)
         {
             try
             {
-                var statsProperty = score.GetType().GetProperty("Statistics",
-                    BindingFlags.Public | BindingFlags.Instance);
-                if (statsProperty != null)
-                {
-                    var stats = statsProperty.GetValue(score) as Dictionary<HitResult, int>;
-                    if (stats != null)
-                    {
-                        stats[HitResult.Miss] = 0;
-                    }
-                }
+                var healthField =
+                    typeof(HealthProcessor).GetField(
+                        "health",
+                        BindingFlags.NonPublic |
+                        BindingFlags.Instance
+                    );
+
+                if (healthField == null)
+                    return;
+
+                float current =
+                    (float)healthField.GetValue(processor);
+
+                current += amount;
+
+                if (current > 1f)
+                    current = 1f;
+
+                healthField.SetValue(processor, current);
             }
-            catch { /* Игнорируем ошибки */ }
+            catch
+            {
+            }
         }
-        
-        // ============ Публичные методы управления модами ============
-        
+
         public void SetAutoPlay(bool enabled)
         {
             AutoPlayEnabled = enabled;
+
             if (enabled)
             {
                 NoMissEnabled = true;
-                RelaxEnabled = false;
-                SubmissionMode = ScoreSubmissionMode.Offline;
+                SubmissionMode =
+                    ScoreSubmissionMode.Offline;
             }
-            ShowToast($"AutoPlay: {(enabled ? "✓ ON" : "✗ OFF")}");
+
+            Toast($"AutoPlay {(enabled ? "ON" : "OFF")}");
         }
-        
+
         public void SetNoMiss(bool enabled)
         {
             NoMissEnabled = enabled;
-            if (!enabled && AutoPlayEnabled) AutoPlayEnabled = false;
-            ShowToast($"NoMiss: {(enabled ? "✓ ON" : "✗ OFF")}");
+
+            Toast($"NoMiss {(enabled ? "ON" : "OFF")}");
         }
-        
+
         public void SetRelax(bool enabled)
         {
             RelaxEnabled = enabled;
-            if (enabled)
-            {
-                SubmissionMode = ScoreSubmissionMode.Clean;
-                AutoPlayEnabled = false;
-            }
-            ShowToast($"Relax: {(enabled ? "✓ ON" : "✗ OFF")}");
+
+            Toast($"Relax {(enabled ? "ON" : "OFF")}");
         }
-        
+
         public void SetInstantSpin(bool enabled)
         {
             InstantSpinEnabled = enabled;
-            ShowToast($"InstantSpin: {(enabled ? "✓ ON" : "✗ OFF")}");
+
+            Toast($"Spin {(enabled ? "ON" : "OFF")}");
         }
-        
-        public void SetSubmissionMode(ScoreSubmissionMode mode)
-        {
-            SubmissionMode = mode;
-            string modeName = mode switch
-            {
-                ScoreSubmissionMode.Clean => "Clean",
-                ScoreSubmissionMode.Offline => "Offline",
-                _ => "Normal"
-            };
-            ShowToast($"Submission: {modeName}");
-        }
-        
-        public void SetAccuracy(float percent)
-        {
-            if (percent <= 0 || percent > 100) return;
-            AccuracyMultiplier = percent / 100f;
-            ShowToast($"Accuracy: {percent}%");
-        }
-        
-        public void SetApproachRate(float ar)
-        {
-            if (ar < -1 || ar > 11) return;
-            ApproachRate = ar;
-            ShowToast($"AR: {ar}");
-        }
-        
-        /// <summary>
-        /// Получить текущее состояние всех модов
-        /// </summary>
-        public Dictionary<string, bool> GetModsState()
+
+        public Dictionary<string, bool> GetStates()
         {
             return new Dictionary<string, bool>
             {
@@ -441,44 +385,51 @@ namespace osu.Android
                 { "InstantSpin", InstantSpinEnabled }
             };
         }
-        
-        private void ShowToast(string message)
+
+        private void Toast(string text)
         {
             try
             {
-                Toast.MakeText(context, message, ToastLength.Short)?.Show();
+                Handler handler =
+                    new Handler(context.MainLooper);
+
+                handler.Post(() =>
+                {
+                    Android.Widget.Toast
+                        .MakeText(
+                            context,
+                            text,
+                            ToastLength.Short
+                        )
+                        ?.Show();
+                });
             }
-            catch { /* Игнорируем ошибки Toast */ }
+            catch
+            {
+            }
         }
-        
-        // ============ IDisposable реализация ============
-        
+
         public void Dispose()
         {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-        
-        protected virtual void Dispose(bool disposing)
-        {
-            if (isDisposed) return;
-            
-            if (disposing)
+            if (disposed)
+                return;
+
+            disposed = true;
+
+            try
             {
-                try
-                {
-                    harmony?.UnpatchAll("com.osu.modmenu.patches");
-                    harmony = null;
-                }
-                catch { /* Игнорируем ошибки при очистке */ }
+                harmony.UnpatchAll(
+                    "com.osu.modmenu"
+                );
             }
-            
-            isDisposed = true;
+            catch
+            {
+            }
         }
-        
+
         ~ModMenu()
         {
-            Dispose(false);
+            Dispose();
         }
     }
 }
