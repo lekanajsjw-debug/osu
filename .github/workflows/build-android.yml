@@ -1,0 +1,38 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - add-mod-menu
+      - master
+  pull_request:
+    branches:
+      - add-mod-menu
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      
+      - name: Restore workloads
+        run: dotnet workload restore
+      
+      - name: Restore Android only
+        run: dotnet restore osu.Android/osu.Android.csproj
+      
+      - name: Build APK
+        run: dotnet publish -c Release -f net8.0-android osu.Android/osu.Android.csproj
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: osu-apk
+          path: osu.Android/bin/Release/net8.0-android/publish/*.apk
