@@ -12,7 +12,6 @@ using Android.Provider;
 using Android.Views;
 using osu.Framework.Android;
 using osu.Game.Database;
-using Debug = System.Diagnostics.Debug;
 using Uri = Android.Net.Uri;
 
 namespace osu.Android
@@ -75,6 +74,7 @@ namespace osu.Android
                     ? ScreenOrientation.FullUser
                     : ScreenOrientation.SensorLandscape;
 
+            // Загружаем rulesets
             Assembly.Load("osu.Game.Rulesets.Osu");
             Assembly.Load("osu.Game.Rulesets.Taiko");
             Assembly.Load("osu.Game.Rulesets.Catch");
@@ -85,14 +85,15 @@ namespace osu.Android
 
         private void initialiseOverlay()
         {
-            // Android 6+ overlay permission check
+            // Android 6.0+ overlay permission
             if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
             {
                 if (!Settings.CanDrawOverlays(this))
                 {
                     var intent = new Intent(
                         Settings.ActionManageOverlayPermission,
-                        Uri.Parse("package:" + PackageName));
+                        Uri.Parse("package:" + PackageName)
+                    );
 
                     intent.AddFlags(ActivityFlags.NewTask);
 
@@ -103,6 +104,7 @@ namespace osu.Android
             }
 
             overlay = new ModMenuOverlay(this);
+
             overlay.Show();
         }
 
