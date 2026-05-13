@@ -1,14 +1,18 @@
 using System;
-using System.Collections.Generic;
 
 namespace osu.Android
 {
     public static class ModMenu
     {
         public static bool AutoPlayEnabled { get; private set; }
+
         public static bool NoMissEnabled { get; private set; }
+
         public static bool RelaxEnabled { get; private set; }
+
         public static bool InstantSpinEnabled { get; private set; }
+
+        public static event Action? OnStateChanged;
 
         public static void SetAutoPlay(bool enabled)
         {
@@ -16,18 +20,51 @@ namespace osu.Android
 
             if (enabled)
                 NoMissEnabled = true;
+
+            notify();
         }
 
-        public static void SetNoMiss(bool enabled) => NoMissEnabled = enabled;
-        public static void SetRelax(bool enabled) => RelaxEnabled = enabled;
-        public static void SetInstantSpin(bool enabled) => InstantSpinEnabled = enabled;
-
-        public static Dictionary<string, bool> GetStates() => new()
+        public static void ToggleAutoPlay()
         {
-            ["AutoPlay"] = AutoPlayEnabled,
-            ["NoMiss"] = NoMissEnabled,
-            ["Relax"] = RelaxEnabled,
-            ["InstantSpin"] = InstantSpinEnabled
-        };
+            SetAutoPlay(!AutoPlayEnabled);
+        }
+
+        public static void SetNoMiss(bool enabled)
+        {
+            NoMissEnabled = enabled;
+            notify();
+        }
+
+        public static void ToggleNoMiss()
+        {
+            SetNoMiss(!NoMissEnabled);
+        }
+
+        public static void SetRelax(bool enabled)
+        {
+            RelaxEnabled = enabled;
+            notify();
+        }
+
+        public static void ToggleRelax()
+        {
+            SetRelax(!RelaxEnabled);
+        }
+
+        public static void SetInstantSpin(bool enabled)
+        {
+            InstantSpinEnabled = enabled;
+            notify();
+        }
+
+        public static void ToggleInstantSpin()
+        {
+            SetInstantSpin(!InstantSpinEnabled);
+        }
+
+        private static void notify()
+        {
+            OnStateChanged?.Invoke();
+        }
     }
 }
