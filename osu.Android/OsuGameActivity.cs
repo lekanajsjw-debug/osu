@@ -17,7 +17,8 @@ using Uri = Android.Net.Uri;
 
 namespace osu.Android
 {
-    [Activity(ConfigurationChanges = DEFAULT_CONFIG_CHANGES,
+    [Activity(
+        ConfigurationChanges = DEFAULT_CONFIG_CHANGES,
         Exported = true,
         LaunchMode = DEFAULT_LAUNCH_MODE,
         MainLauncher = true)]
@@ -27,7 +28,6 @@ namespace osu.Android
 
         private bool gameCreated;
 
-        // ===== OVERLAY =====
         private ModMenuOverlay? overlay;
 
         public new bool IsTablet { get; private set; }
@@ -55,14 +55,13 @@ namespace osu.Android
 
             handleIntent(Intent);
 
-            Window.AddFlags(WindowManagerFlags.Fullscreen);
-
-            Window.AddFlags(WindowManagerFlags.KeepScreenOn);
+            Window?.AddFlags(WindowManagerFlags.Fullscreen);
+            Window?.AddFlags(WindowManagerFlags.KeepScreenOn);
 
             Point displaySize = new Point();
 
 #pragma warning disable CA1422
-            WindowManager.DefaultDisplay.GetSize(displaySize);
+            WindowManager?.DefaultDisplay?.GetSize(displaySize);
 #pragma warning restore CA1422
 
             float smallestWidthDp =
@@ -81,36 +80,36 @@ namespace osu.Android
             Assembly.Load("osu.Game.Rulesets.Catch");
             Assembly.Load("osu.Game.Rulesets.Mania");
 
-            // ===== OVERLAY INIT =====
+            initialiseOverlay();
+        }
 
+        private void initialiseOverlay()
+        {
+            // Android 6+ overlay permission check
             if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
             {
-                if (!Build.VERSION.SdkInt >= BuildVersionCodes.M && Settings.CanDrawOverlays(this))
+                if (!Settings.CanDrawOverlays(this))
                 {
                     var intent = new Intent(
                         Settings.ActionManageOverlayPermission,
-                        Uri.Parse("package:" + PackageName)
-                    );
+                        Uri.Parse("package:" + PackageName));
+
+                    intent.AddFlags(ActivityFlags.NewTask);
 
                     StartActivity(intent);
-                }
-                else
-                {
-                    overlay = new ModMenuOverlay(this);
 
-                    overlay.Show();
+                    return;
                 }
             }
-            else
-            {
-                overlay = new ModMenuOverlay(this);
 
-                overlay.Show();
-            }
+            overlay = new ModMenuOverlay(this);
+            overlay.Show();
         }
 
         protected override void OnNewIntent(Intent? intent)
         {
+            base.OnNewIntent(intent);
+
             handleIntent(intent);
         }
 
@@ -163,7 +162,7 @@ namespace osu.Android
                     uris.Select(async uri =>
                     {
                         var task = await AndroidImportTask
-                            .Create(ContentResolver!, uri)
+                            .Create(ContentResolver, uri)
                             .ConfigureAwait(false);
 
                         if (task != null)
