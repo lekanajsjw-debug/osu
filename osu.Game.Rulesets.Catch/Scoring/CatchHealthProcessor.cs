@@ -1,20 +1,18 @@
-using osu.Game.Rulesets.Judgements;
+using osu.Game.Rulesets.Catch.Scoring;
+using osu.Game.Rulesets.Scoring;
 
 namespace osu.Game.Rulesets.Catch.Judgements
 {
-    public partial class CatchHealthProcessor
+    public partial class CatchHealthProcessor : ScoreProcessor
     {
-        public override void ApplyResult(JudgementResult result)
+        protected override double HealthIncreaseFor(HitResult result)
         {
 #if ANDROID
-            if (osu.Android.ModMenu.NoMissEnabled)
-            {
-                if (result.Type == HitResult.Miss)
-                    return;
-            }
+            if (osu.Android.ModMenu.NoMissEnabled && result == HitResult.Miss)
+                return 0;
 #endif
 
-            base.ApplyResult(result);
+            return base.HealthIncreaseFor(result);
         }
     }
 }
