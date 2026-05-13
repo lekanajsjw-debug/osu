@@ -8,8 +8,8 @@ using Android.Content;
 using Android.Content.PM;
 using Android.Graphics;
 using Android.OS;
-using Android.Views;
 using Android.Provider;
+using Android.Views;
 using osu.Framework.Android;
 using osu.Game.Database;
 using Debug = System.Diagnostics.Debug;
@@ -24,12 +24,14 @@ namespace osu.Android
     public class OsuGameActivity : AndroidGameActivity
     {
         private readonly OsuGameAndroid game;
+
         private bool gameCreated;
 
         // ===== OVERLAY =====
         private ModMenuOverlay? overlay;
 
         public new bool IsTablet { get; private set; }
+
         public ScreenOrientation DefaultOrientation;
 
         public OsuGameActivity()
@@ -43,6 +45,7 @@ namespace osu.Android
                 throw new InvalidOperationException("Game already created.");
 
             gameCreated = true;
+
             return game;
         }
 
@@ -53,6 +56,7 @@ namespace osu.Android
             handleIntent(Intent);
 
             Window.AddFlags(WindowManagerFlags.Fullscreen);
+
             Window.AddFlags(WindowManagerFlags.KeepScreenOn);
 
             Point displaySize = new Point();
@@ -68,7 +72,9 @@ namespace osu.Android
             IsTablet = smallestWidthDp >= 600f;
 
             RequestedOrientation = DefaultOrientation =
-                IsTablet ? ScreenOrientation.FullUser : ScreenOrientation.SensorLandscape;
+                IsTablet
+                    ? ScreenOrientation.FullUser
+                    : ScreenOrientation.SensorLandscape;
 
             Assembly.Load("osu.Game.Rulesets.Osu");
             Assembly.Load("osu.Game.Rulesets.Taiko");
@@ -76,47 +82,73 @@ namespace osu.Android
             Assembly.Load("osu.Game.Rulesets.Mania");
 
             // ===== OVERLAY INIT =====
-            if (Settings.CanDrawOverlays(this))
+
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
             {
-                overlay = new ModMenuOverlay(this);
+                if (!Settings.CanDrawOverlays(this))
+                {
+                    var intent = new Intent(
+                        Settings.ActionManageOverlayPermission,
+                        Uri.Parse("package:" + PackageName)
+                    );
+
+                    StartActivity(intent);
+                }
+                else
+                {
+                    overlay = new ModMenuOverlay(this);
+
+                    overlay.Show();
+                }
             }
             else
             {
-                var intent = new Intent(Settings.ActionManageOverlayPermission);
-                StartActivity(intent);
+                overlay = new ModMenuOverlay(this);
+
+                overlay.Show();
             }
         }
 
-        protected override void OnNewIntent(Intent? intent) => handleIntent(intent);
+        protected override void OnNewIntent(Intent? intent)
+        {
+            handleIntent(intent);
+        }
 
         private void handleIntent(Intent? intent)
         {
-            if (intent == null) return;
+            if (intent == null)
+                return;
 
             switch (intent.Action)
             {
                 case Intent.ActionDefault:
+
                     if (intent.Scheme == ContentResolver.SchemeContent)
                     {
                         if (intent.Data != null)
                             handleImportFromUris(intent.Data);
                     }
+
                     break;
 
                 case Intent.ActionSend:
                 case Intent.ActionSendMultiple:
-                    if (intent.ClipData == null) break;
+
+                    if (intent.ClipData == null)
+                        break;
 
                     var uris = new List<Uri>();
 
                     for (int i = 0; i < intent.ClipData.ItemCount; i++)
                     {
                         var item = intent.ClipData.GetItemAt(i);
+
                         if (item?.Uri != null)
                             uris.Add(item.Uri);
                     }
 
                     handleImportFromUris(uris.ToArray());
+
                     break;
             }
         }
@@ -127,28 +159,33 @@ namespace osu.Android
             {
                 var tasks = new List<ImportTask>();
 
-                await Task.WhenAll(uris.Select(async uri =>
-                {
-                    var task = await AndroidImportTask.Create(ContentResolver!, uri)
-                        .ConfigureAwait(false);
-
-                    if (task != null)
+                await Task.WhenAll(
+                    uris.Select(async uri =>
                     {
-                        lock (tasks)
-                            tasks.Add(task);
-                    }
-                })).ConfigureAwait(false);
+                        var task = await AndroidImportTask
+                            .Create(ContentResolver!, uri)
+                            .ConfigureAwait(false);
 
-                await game.Import(tasks.ToArray()).ConfigureAwait(false);
+                        if (task != null)
+                        {
+                            lock (tasks)
+                                tasks.Add(task);
+                        }
+                    })
+                ).ConfigureAwait(false);
+
+                await game
+                    .Import(tasks.ToArray())
+                    .ConfigureAwait(false);
 
             }, TaskCreationOptions.LongRunning);
         }
 
         protected override void OnDestroy()
         {
-            base.OnDestroy();
-
             overlay?.Dispose();
+
+            base.OnDestroy();
         }
     }
 }
