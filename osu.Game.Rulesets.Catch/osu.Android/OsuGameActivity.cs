@@ -85,7 +85,7 @@ namespace osu.Android
 
             if (Build.VERSION.SdkInt >= BuildVersionCodes.M)
             {
-                if (!Settings.CanDrawOverlays(this))
+                if (!Build.VERSION.SdkInt >= BuildVersionCodes.M && Settings.CanDrawOverlays(this))
                 {
                     var intent = new Intent(
                         Settings.ActionManageOverlayPermission,

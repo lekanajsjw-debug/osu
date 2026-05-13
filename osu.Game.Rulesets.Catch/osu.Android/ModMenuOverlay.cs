@@ -40,7 +40,7 @@ namespace osu.Android
             {
                 if (!Settings.CanDrawOverlays(context))
                 {
-                    Android.Util.Log.Debug(
+                    global::Android.Util.Log.Debug(
                         "ModMenu",
                         "Overlay permission denied"
                     );
