@@ -1,5 +1,5 @@
-using Android.App;
 using Android.Content;
+using Android.OS;
 using Android.Widget;
 using HarmonyLib;
 using osu.Game.Rulesets.Judgements;
@@ -27,7 +27,6 @@ namespace osu.Android
         public enum ScoreSubmissionMode
         {
             Normal,
-            Clean,
             Offline
         }
 
@@ -61,7 +60,7 @@ namespace osu.Android
                     nameof(OnHealthApplyResultPrefix)
                 );
 
-                var osuScoreProcessor =
+                Type osuScoreProcessor =
                     typeof(ScoreProcessor).Assembly.GetType(
                         "osu.Game.Rulesets.Osu.Scoring.OsuScoreProcessor"
                     );
@@ -76,7 +75,7 @@ namespace osu.Android
                     );
                 }
 
-                var scoreManager =
+                Type scoreManager =
                     typeof(Score).Assembly.GetType(
                         "osu.Game.Scoring.ScoreManager"
                     );
@@ -91,11 +90,11 @@ namespace osu.Android
                     );
                 }
 
-                Toast("ModMenu loaded");
+                ToastMessage("ModMenu loaded");
             }
             catch (Exception ex)
             {
-                Toast($"Init error: {ex.Message}");
+                ToastMessage($"Init error: {ex.Message}");
             }
         }
 
@@ -111,7 +110,7 @@ namespace osu.Android
                 if (targetType == null)
                     return;
 
-                var method = targetType.GetMethod(
+                MethodInfo method = targetType.GetMethod(
                     methodName,
                     BindingFlags.Public |
                     BindingFlags.NonPublic |
@@ -124,7 +123,7 @@ namespace osu.Android
 
                 if (method == null)
                 {
-                    Toast($"Method not found: {methodName}");
+                    ToastMessage($"Method not found: {targetType.FullName}.{methodName}");
                     return;
                 }
 
@@ -133,40 +132,37 @@ namespace osu.Android
 
                 if (!string.IsNullOrEmpty(prefixMethod))
                 {
-                    var m = typeof(ModMenu).GetMethod(
+                    MethodInfo prefixInfo = typeof(ModMenu).GetMethod(
                         prefixMethod,
                         BindingFlags.Static |
-                        BindingFlags.Public |
                         BindingFlags.NonPublic
                     );
 
-                    if (m != null)
-                        prefix = new HarmonyMethod(m);
+                    if (prefixInfo != null)
+                        prefix = new HarmonyMethod(prefixInfo);
                 }
 
                 if (!string.IsNullOrEmpty(postfixMethod))
                 {
-                    var m = typeof(ModMenu).GetMethod(
+                    MethodInfo postfixInfo = typeof(ModMenu).GetMethod(
                         postfixMethod,
                         BindingFlags.Static |
-                        BindingFlags.Public |
                         BindingFlags.NonPublic
                     );
 
-                    if (m != null)
-                        postfix = new HarmonyMethod(m);
+                    if (postfixInfo != null)
+                        postfix = new HarmonyMethod(postfixInfo);
                 }
 
                 harmony.Patch(method, prefix, postfix);
             }
             catch (Exception ex)
             {
-                Toast($"Patch error: {ex.Message}");
+                ToastMessage($"Patch error: {ex.Message}");
             }
         }
 
-        public static bool OnApplyResultPrefix(
-            ScoreProcessor __instance,
+        private static bool OnApplyResultPrefix(
             JudgementResult result)
         {
             try
@@ -174,24 +170,15 @@ namespace osu.Android
                 if (result == null)
                     return true;
 
-                if (NoMissEnabled &&
-                    result.Type == HitResult.Miss)
+                if (NoMissEnabled && result.Type == HitResult.Miss)
                 {
-                    ModifyJudgementResult(
-                        result,
-                        HitResult.Meh,
-                        0
-                    );
+                    SetResultType(result, HitResult.Meh);
                 }
 
-                if (RelaxEnabled &&
-                    result.Type != HitResult.Miss)
+                if (RelaxEnabled)
                 {
-                    ModifyJudgementResult(
-                        result,
-                        HitResult.Great,
-                        0
-                    );
+                    if (result.Type != HitResult.Miss)
+                        SetResultType(result, HitResult.Great);
                 }
 
                 return true;
@@ -202,7 +189,7 @@ namespace osu.Android
             }
         }
 
-        public static bool OnHealthApplyResultPrefix(
+        private static bool OnHealthApplyResultPrefix(
             HealthProcessor __instance,
             JudgementResult result)
         {
@@ -211,9 +198,11 @@ namespace osu.Android
                 if (__instance == null)
                     return true;
 
-                if (NoMissEnabled || AutoPlayEnabled)
+                if ((NoMissEnabled || AutoPlayEnabled) &&
+                    result != null &&
+                    result.Type != HitResult.Miss)
                 {
-                    AddHealth(__instance, 0.15f);
+                    AddHealth(__instance, 0.05f);
                 }
 
                 return true;
@@ -224,32 +213,32 @@ namespace osu.Android
             }
         }
 
-        public static bool OnSimulateAutoplayPrefix(
+        private static bool OnSimulateAutoplayPrefix(
             object __instance,
             HitObject hitObject)
         {
             try
             {
-                if (!InstantSpinEnabled || hitObject == null)
+                if (!InstantSpinEnabled)
                     return true;
 
-                var spinnerType =
-                    hitObject.GetType();
+                if (hitObject == null)
+                    return true;
 
-                if (spinnerType.Name.Contains("Spinner"))
-                {
-                    var completeMethod =
-                        spinnerType.GetMethod(
-                            "Complete",
-                            BindingFlags.Public |
-                            BindingFlags.NonPublic |
-                            BindingFlags.Instance
-                        );
+                string typeName = hitObject.GetType().Name;
 
-                    completeMethod?.Invoke(hitObject, null);
+                if (!typeName.Contains("Spinner"))
+                    return true;
 
-                    return false;
-                }
+                PropertyInfo endTimeProp = hitObject.GetType().GetProperty(
+                    "EndTime",
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.Instance
+                );
+
+                if (endTimeProp == null)
+                    return true;
 
                 return true;
             }
@@ -259,17 +248,11 @@ namespace osu.Android
             }
         }
 
-        public static bool OnScoreSubmitPrefix()
+        private static bool OnScoreSubmitPrefix()
         {
             try
             {
-                if (SubmissionMode ==
-                    ScoreSubmissionMode.Offline)
-                {
-                    return false;
-                }
-
-                return true;
+                return SubmissionMode != ScoreSubmissionMode.Offline;
             }
             catch
             {
@@ -277,32 +260,23 @@ namespace osu.Android
             }
         }
 
-        private static void ModifyJudgementResult(
+        private static void SetResultType(
             JudgementResult result,
-            HitResult newType,
-            double offset)
+            HitResult hitResult)
         {
             try
             {
-                var typeProp =
-                    typeof(JudgementResult).GetProperty(
-                        "Type",
-                        BindingFlags.Public |
-                        BindingFlags.NonPublic |
-                        BindingFlags.Instance
-                    );
+                PropertyInfo typeProp = typeof(JudgementResult).GetProperty(
+                    "Type",
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.Instance
+                );
 
-                typeProp?.SetValue(result, newType);
-
-                var offsetProp =
-                    typeof(JudgementResult).GetProperty(
-                        "TimeOffset",
-                        BindingFlags.Public |
-                        BindingFlags.NonPublic |
-                        BindingFlags.Instance
-                    );
-
-                offsetProp?.SetValue(result, offset);
+                if (typeProp != null && typeProp.CanWrite)
+                {
+                    typeProp.SetValue(result, hitResult);
+                }
             }
             catch
             {
@@ -315,23 +289,29 @@ namespace osu.Android
         {
             try
             {
-                var healthField =
-                    typeof(HealthProcessor).GetField(
-                        "health",
-                        BindingFlags.NonPublic |
-                        BindingFlags.Instance
-                    );
+                FieldInfo healthField = typeof(HealthProcessor).GetField(
+                    "health",
+                    BindingFlags.NonPublic |
+                    BindingFlags.Instance
+                );
 
                 if (healthField == null)
                     return;
 
-                float current =
-                    (float)healthField.GetValue(processor);
+                object value = healthField.GetValue(processor);
+
+                if (value == null)
+                    return;
+
+                float current = Convert.ToSingle(value);
 
                 current += amount;
 
                 if (current > 1f)
                     current = 1f;
+
+                if (current < 0f)
+                    current = 0f;
 
                 healthField.SetValue(processor, current);
             }
@@ -347,32 +327,31 @@ namespace osu.Android
             if (enabled)
             {
                 NoMissEnabled = true;
-                SubmissionMode =
-                    ScoreSubmissionMode.Offline;
+                SubmissionMode = ScoreSubmissionMode.Offline;
             }
 
-            Toast($"AutoPlay {(enabled ? "ON" : "OFF")}");
+            ToastMessage($"AutoPlay {(enabled ? "ON" : "OFF")}");
         }
 
         public void SetNoMiss(bool enabled)
         {
             NoMissEnabled = enabled;
 
-            Toast($"NoMiss {(enabled ? "ON" : "OFF")}");
+            ToastMessage($"NoMiss {(enabled ? "ON" : "OFF")}");
         }
 
         public void SetRelax(bool enabled)
         {
             RelaxEnabled = enabled;
 
-            Toast($"Relax {(enabled ? "ON" : "OFF")}");
+            ToastMessage($"Relax {(enabled ? "ON" : "OFF")}");
         }
 
         public void SetInstantSpin(bool enabled)
         {
             InstantSpinEnabled = enabled;
 
-            Toast($"Spin {(enabled ? "ON" : "OFF")}");
+            ToastMessage($"InstantSpin {(enabled ? "ON" : "OFF")}");
         }
 
         public Dictionary<string, bool> GetStates()
@@ -386,22 +365,19 @@ namespace osu.Android
             };
         }
 
-        private void Toast(string text)
+        private void ToastMessage(string text)
         {
             try
             {
-                Handler handler =
-                    new Handler(context.MainLooper);
+                Handler handler = new Handler(context.MainLooper);
 
                 handler.Post(() =>
                 {
-                    Android.Widget.Toast
-                        .MakeText(
-                            context,
-                            text,
-                            ToastLength.Short
-                        )
-                        ?.Show();
+                    Toast.MakeText(
+                        context,
+                        text,
+                        ToastLength.Short
+                    )?.Show();
                 });
             }
             catch
@@ -418,13 +394,13 @@ namespace osu.Android
 
             try
             {
-                harmony.UnpatchAll(
-                    "com.osu.modmenu"
-                );
+                harmony.UnpatchAll("com.osu.modmenu");
             }
             catch
             {
             }
+
+            GC.SuppressFinalize(this);
         }
 
         ~ModMenu()
