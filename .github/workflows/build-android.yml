@@ -1,38 +1,45 @@
 name: Build Android APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - add-mod-menu
-      - master
-  pull_request:
-    branches:
-      - add-mod-menu
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      
-      - name: Restore workloads
-        run: dotnet workload restore
-      
-      - name: Restore Android only
-        run: dotnet restore osu.Android/osu.Android.csproj
-      
-      - name: Build APK
-        run: dotnet publish -c Release -f net8.0-android osu.Android/osu.Android.csproj
-      
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish Android APK
+        run: |
+          dotnet publish osu.Android \
+            -c Release \
+            -f net8.0-android \
+            -p:AndroidPackageFormat=apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: osu-apk
+          name: osu-lazer-android
           path: osu.Android/bin/Release/net8.0-android/publish/*.apk
