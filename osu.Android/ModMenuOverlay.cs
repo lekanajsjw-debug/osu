@@ -1,63 +1,126 @@
 using Android.Content;
 using Android.Views;
 using Android.Widget;
+using Android.Graphics;
 using Android.OS;
-using System;
 
 namespace osu.Android
 {
     public sealed class ModMenuOverlay : IDisposable
     {
         private readonly Context context;
-        private readonly WindowManager windowManager;
-        private Button button;
+        private readonly IWindowManager windowManager;
+
+        private View trigger;
+        private LinearLayout panel;
+
         private bool shown;
 
         public ModMenuOverlay(Context ctx)
         {
             context = ctx;
-            windowManager = (WindowManager)context.GetSystemService(Context.WindowService);
+            windowManager = ctx.GetSystemService(Context.WindowService) as IWindowManager;
 
-            CreateButton();
+            CreateTrigger();
+            CreatePanel();
         }
 
-        private void CreateButton()
+        // ===== INVISIBLE TRIGGER =====
+
+        private void CreateTrigger()
         {
-            button = new Button(context)
+            trigger = new View(context);
+
+            var p = new WindowManagerLayoutParams(
+                1, 1,
+                WindowManagerTypes.ApplicationOverlay,
+                WindowManagerFlags.NotFocusable,
+                PixelFormat.Translucent
+            );
+
+            p.Gravity = GravityFlags.Left | GravityFlags.Top;
+            p.X = 0;
+            p.Y = 0;
+
+            trigger.Click += (s, e) =>
             {
-                Text = "MOD"
+                TogglePanel();
             };
 
-            button.Click += (s, e) =>
+            windowManager.AddView(trigger, p);
+        }
+
+        // ===== PANEL =====
+
+        private void CreatePanel()
+        {
+            panel = new LinearLayout(context)
             {
-                ModMenu.SetAutoPlay(!ModMenu.AutoPlayEnabled);
+                Orientation = Orientation.Vertical
             };
 
-            var parameters = new WindowManagerLayoutParams(
+            panel.SetBackgroundColor(Color.Argb(180, 0, 0, 0));
+
+            AddButton("AutoPlay", () => ModMenu.ToggleAutoPlay());
+            AddButton("NoMiss", () => ModMenu.ToggleNoMiss());
+            AddButton("Relax", () => ModMenu.ToggleRelax());
+            AddButton("InstantSpin", () => ModMenu.ToggleInstantSpin());
+            AddButton("Close", HidePanel);
+
+            var p = new WindowManagerLayoutParams(
                 WindowManagerLayoutParams.WrapContent,
                 WindowManagerLayoutParams.WrapContent,
                 WindowManagerTypes.ApplicationOverlay,
                 WindowManagerFlags.NotFocusable,
-                Format.Translucent
+                PixelFormat.Translucent
             );
 
-            parameters.Gravity = GravityFlags.Left | GravityFlags.Top;
-            parameters.X = 20;
-            parameters.Y = 200;
+            p.Gravity = GravityFlags.Center;
 
-            windowManager.AddView(button, parameters);
+            panel.Visibility = ViewStates.Gone;
+
+            windowManager.AddView(panel, p);
+        }
+
+        private void AddButton(string text, System.Action action)
+        {
+            var btn = new Button(context)
+            {
+                Text = text
+            };
+
+            btn.Click += (s, e) => action();
+            panel.AddView(btn);
+        }
+
+        // ===== CONTROL =====
+
+        private void TogglePanel()
+        {
+            if (shown) HidePanel();
+            else ShowPanel();
+        }
+
+        private void ShowPanel()
+        {
+            panel.Visibility = ViewStates.Visible;
             shown = true;
+        }
+
+        private void HidePanel()
+        {
+            panel.Visibility = ViewStates.Gone;
+            shown = false;
         }
 
         public void Dispose()
         {
-            if (shown && button != null)
+            try
             {
-                windowManager.RemoveView(button);
-                button = null;
+                windowManager.RemoveView(trigger);
+                windowManager.RemoveView(panel);
             }
-
-            shown = false;
+            catch { }
         }
     }
 }
